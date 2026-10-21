@@ -33,8 +33,8 @@ jobs:
       TEST_DATABASE_URL: postgresql+psycopg://infrascope:ci-only-password@localhost:5432/infrascope_test
       INFRASCOPE_TEST_TARGET_URL: http://localhost:8081
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -62,8 +62,8 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
@@ -80,7 +80,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Create .env (random DB password; webhooks to the test receiver)
         run: |
           pw=$(openssl rand -hex 24); echo "::add-mask::$pw"
