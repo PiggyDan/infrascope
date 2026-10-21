@@ -249,7 +249,8 @@ Every push and pull request runs [`.github/workflows/ci.yml`](.github/workflows/
 | **Stack** | `docker compose up --wait` of the real images, then the smoke test (outage → incident → recovery → restart persistence), the suite inside the API container, and security checks: CSP/frame headers, 401 without a key, DB not published, dashboard can't reach the DB |
 
 Generated secrets (database password, temporary API key) are masked in CI logs. Dependabot
-proposes weekly updates for pip, npm, GitHub Actions and Docker base images.
+proposes weekly, grouped updates for pip, npm, GitHub Actions and Docker base images, and
+waits 14 days after a release before proposing it.
 
 ## What I'd do next
 
@@ -270,6 +271,9 @@ Deliberate Day 1–3 trade-offs, and how I'd lift each one:
 - **Hardening for real deployment.** TLS at the proxy, rate limiting on failed
   authentication, audit log of key usage and changes, per-user identities (OIDC) instead of
   shared keys, and the database password in a secret manager.
+- **Move to `httpx2`.** Starlette now recommends `httpx2` (the Pydantic team's successor to
+  `httpx`) for its test client. Migrating both the checker and the tests together keeps a
+  single HTTP stack.
 - **Observability of the monitor itself.** Expose Prometheus metrics: check latency
   histogram, scheduler lag, queue depth.
 
