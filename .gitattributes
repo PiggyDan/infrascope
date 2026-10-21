@@ -1,0 +1,3 @@
+# Keep LF endings for files consumed inside Linux containers
+* text=auto eol=lf
+*.ps1 text eol=crlf
