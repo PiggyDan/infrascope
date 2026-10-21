@@ -1,5 +1,9 @@
 # InfraScope
 
+[![CI](https://github.com/PiggyDan/infrascope/actions/workflows/ci.yml/badge.svg)](https://github.com/PiggyDan/infrascope/actions/workflows/ci.yml)
+![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
+![License: MIT](https://img.shields.io/badge/license-MIT-green)
+
 Open-source infrastructure monitoring and incident detection. InfraScope checks HTTP(S)
 endpoints on a schedule, stores every real measurement in PostgreSQL, and opens and
 resolves incidents automatically.
@@ -234,9 +238,45 @@ uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000
 | Local checks of `http://localhost:...` take ~2 s | Windows tries `::1` first and waits ~2 s before falling back to IPv4. Bind the local server to `::1` (or use Docker, where service names resolve directly). |
 | `Activate.ps1 cannot be loaded` | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, or run `.\.venv\Scripts\python.exe` directly. |
 
+## Continuous integration
+
+Every push and pull request runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
+
+| Job | What it proves |
+|---|---|
+| **Backend** | `ruff` lint + format check; the full pytest suite against a real PostgreSQL 16 service and the real test-target service (unit + integration) |
+| **Frontend** | `npm audit` (runtime deps), strict TypeScript, Vitest, production build |
+| **Stack** | `docker compose up --wait` of the real images, then the smoke test (outage → incident → recovery → restart persistence), the suite inside the API container, and security checks: CSP/frame headers, 401 without a key, DB not published, dashboard can't reach the DB |
+
+Generated secrets (database password, temporary API key) are masked in CI logs. Dependabot
+proposes weekly updates for pip, npm, GitHub Actions and Docker base images.
+
+## What I'd do next
+
+Deliberate Day 1–3 trade-offs, and how I'd lift each one:
+
+- **Scale the monitor out.** The scheduler runs in the API process, so only one replica is
+  safe. Next step: a separate `worker` service that leases due targets with
+  `SELECT … FOR UPDATE SKIP LOCKED`, so N workers share the load without double-checking.
+- **Data retention.** Results grow without bound. Add a retention job plus hourly rollups
+  (min/avg/p95, uptime), or move results to TimescaleDB hypertables.
+- **Monitor real (external) hosts safely.** The SSRF guard is a hostname allowlist that trusts
+  Docker DNS. For arbitrary hosts: resolve first, block private/link-local/metadata ranges,
+  then pin the connection to the vetted IP (defeats DNS rebinding).
+- **More check types.** TCP connect, DNS resolution, TLS certificate expiry, keyword match on
+  the response body. The `TargetType` enum and checker interface are the extension points.
+- **Notifications.** Webhook / Slack / e-mail on incident open and resolve, with per-target
+  routing and an escalation delay.
+- **Hardening for real deployment.** TLS at the proxy, rate limiting on failed
+  authentication, audit log of key usage and changes, per-user identities (OIDC) instead of
+  shared keys, and the database password in a secret manager.
+- **Observability of the monitor itself.** Expose Prometheus metrics: check latency
+  histogram, scheduler lag, queue depth.
+
 ## Project layout
 
 ```
+.github/               CI workflow + Dependabot
 app/
   main.py              FastAPI factory + lifespan (starts/stops the monitor)
   cli.py               Admin CLI (create/list/revoke API keys)
