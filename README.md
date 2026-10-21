@@ -11,10 +11,12 @@ resolves incidents automatically.
 > **Status:** monitoring backend, API-key authentication and a web dashboard.
 > Progress logs: [Day 1](docs/DAY1_PROGRESS.md) · [Day 2](docs/DAY2_PROGRESS.md).
 
-![InfraScope dashboard: summary tiles, targets with status, incident history, and a response-time chart for a failing target](docs/images/dashboard-light.png)
+![Live recording: a target starts failing, InfraScope opens an incident after two failed checks, then resolves it after two successful checks](docs/images/demo.gif)
 
 <details>
-<summary>Dark mode</summary>
+<summary>Screenshots (light and dark mode)</summary>
+
+![InfraScope dashboard: summary tiles, targets with status, incident history, and a response-time chart](docs/images/dashboard-light.png)
 
 ![InfraScope dashboard in dark mode](docs/images/dashboard-dark.png)
 </details>

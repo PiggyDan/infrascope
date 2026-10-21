@@ -65,12 +65,12 @@ docker compose exec api pytest -q                       # 120 passed (PostgreSQL
 ```
 
 ## Known problems / notes
-1. Port 5432 may already be taken on a developer machine by another PostgreSQL; InfraScope's
+1. Single API process only (in-process scheduler); documented in ARCHITECTURE.
+2. No authentication — Day 2, by design.
+3. Starlette TestClient emits an anyio deprecation warning (upstream, harmless).
+4. On Windows, `localhost` checks against IPv4-only local servers add ~2 s (documented).
+5. Port 5432 may already be taken on a developer machine by another PostgreSQL; InfraScope's
    database is never published, so there is no conflict (`docker port infrascope-db-1` is empty).
-2. Single API process only (in-process scheduler); documented in ARCHITECTURE.
-3. No authentication — Day 2, by design.
-4. Starlette TestClient emits an anyio deprecation warning (upstream, harmless).
-5. On Windows, `localhost` checks against IPv4-only local servers add ~2 s (documented).
 
 ## Next task (Day 2)
 1. Authentication/authorization for the API (API keys or OAuth2/JWT), with tests.

@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { formatCount, formatDuration, formatMs, formatRelative, niceCeil, percentile } from "./format";
+import {
+  formatCount,
+  formatDuration,
+  formatMs,
+  formatRelative,
+  niceTicks,
+  percentile,
+} from "./format";
 
 describe("formatMs", () => {
   it.each([
@@ -52,17 +59,30 @@ describe("formatRelative", () => {
   });
 });
 
-describe("niceCeil", () => {
+describe("niceTicks", () => {
   it.each([
-    [0, 1],
-    [0.7, 1],
-    [3, 5],
-    [16.2, 20],
-    [21, 25],
-    [130, 200],
-    [2001, 2500],
-  ])("%s -> %s", (input, expected) => {
-    expect(niceCeil(input)).toBe(expected);
+    [4.0, [0, 1, 2, 3, 4]],
+    [10.2, [0, 5, 10, 15]],
+    [5, [0, 2, 4, 6]],
+    [0.4, [0, 0.1, 0.2, 0.3, 0.4]],
+    [350, [0, 100, 200, 300, 400]],
+    [1234, [0, 500, 1000, 1500]],
+    [0, [0, 0.25, 0.5, 0.75, 1]],
+  ])("max %s -> %j", (max, expected) => {
+    expect(niceTicks(max)).toEqual(expected);
+  });
+
+  it("always yields clean, evenly spaced ticks that cover the max", () => {
+    for (const max of [0.07, 1.3, 2.9, 7.7, 13, 48, 99, 101, 777, 5001]) {
+      const ticks = niceTicks(max);
+      const step = ticks[1] - ticks[0];
+      expect(ticks[0]).toBe(0);
+      expect(ticks[ticks.length - 1]).toBeGreaterThanOrEqual(max);
+      expect(ticks.length).toBeGreaterThanOrEqual(3);
+      expect(ticks.length).toBeLessThanOrEqual(6);
+      const mantissa = step / 10 ** Math.floor(Math.log10(step));
+      expect([1, 2, 2.5, 5]).toContain(Number(mantissa.toFixed(6)));
+    }
   });
 });
 

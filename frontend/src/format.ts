@@ -48,15 +48,21 @@ export function formatDateTime(iso: string): string {
   });
 }
 
-/** Round up to a "nice" axis maximum: 1, 2, 2.5 or 5 × 10^n. */
-export function niceCeil(value: number): number {
-  if (!(value > 0)) return 1;
-  const exponent = Math.floor(Math.log10(value));
+/**
+ * Axis ticks from 0 that land on clean numbers: the step is 1, 2, 2.5 or 5 × 10^n,
+ * chosen so roughly four intervals cover `max`. (Splitting a "nice" max into fixed
+ * quarters gives ticks like 1.25 and 3.75, which display as 1.3 / 3.8.)
+ */
+export function niceTicks(max: number, targetIntervals = 4): number[] {
+  const value = max > 0 ? max : 1;
+  const raw = value / targetIntervals;
+  const exponent = Math.floor(Math.log10(raw));
   const base = 10 ** exponent;
-  for (const step of [1, 2, 2.5, 5, 10]) {
-    if (value <= step * base) return step * base;
-  }
-  return 10 * base;
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * base).find((s) => s >= raw)!;
+  const count = Math.ceil(value / step - 1e-9);
+  // Round away floating-point noise (0.30000000000000004 → 0.3).
+  const decimals = Math.max(0, -exponent + 1);
+  return Array.from({ length: count + 1 }, (_, i) => Number((i * step).toFixed(decimals)));
 }
 
 /** Percentile (0–100) using nearest-rank. Returns null for an empty list. */

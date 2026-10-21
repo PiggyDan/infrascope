@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 
 import { areaPath, evenTicks, linePath, linearScale, nearestIndex, toPoints } from "../chart";
-import { formatMs, formatTime, niceCeil } from "../format";
+import { formatMs, formatTime, niceTicks } from "../format";
 import type { CheckResult } from "../types";
 
 const HEIGHT = 200;
@@ -26,14 +26,15 @@ export function ResponseTimeChart({ results, title }: { results: CheckResult[]; 
     const t0 = points[0].t;
     const t1 = points.length > 1 ? points[points.length - 1].t : t0 + 1000;
     const values = points.map((p) => p.v).filter((v): v is number => v !== null);
-    const yMax = niceCeil(Math.max(1, ...values));
+    const yTicks = niceTicks(Math.max(0, ...values));
+    const yMax = yTicks[yTicks.length - 1];
     const x = linearScale(t0, t1, MARGIN.left, width - MARGIN.right);
     const y = linearScale(0, yMax, HEIGHT - MARGIN.bottom, MARGIN.top);
     return {
       x,
       y,
       xs: points.map((p) => x(p.t)),
-      yTicks: evenTicks(0, yMax, 5),
+      yTicks,
       xTicks: evenTicks(t0, t1, width < 480 ? 3 : 4),
       baseline: HEIGHT - MARGIN.bottom,
     };

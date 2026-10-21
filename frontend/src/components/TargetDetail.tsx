@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 
 import type { ApiClient } from "../api";
 import { formatMs, formatTime, percentile } from "../format";
@@ -12,7 +12,12 @@ const TABLE_ROWS = 15;
 
 export function TargetDetail({ client, target }: { client: ApiClient; target: Target }) {
   const fetchResults = useCallback(() => client.results(target.id, RESULT_LIMIT), [client, target.id]);
-  const { data: results, loading, error } = usePolling(fetchResults, 5000);
+  const { data: results, loading, error, refresh } = usePolling(fetchResults, 5000);
+  // Refetch as soon as the targets list reports a newer check, so this panel never
+  // lags behind the status badge and incidents shown elsewhere on the page.
+  useEffect(() => {
+    if (target.last_checked_at) refresh();
+  }, [target.last_checked_at, refresh]);
 
   const times = (results ?? []).map((r) => r.response_time_ms).filter((v): v is number => v !== null);
   const successes = (results ?? []).filter((r) => r.success).length;
