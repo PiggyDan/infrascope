@@ -23,6 +23,7 @@ from app.config import Settings
 from app.models import MonitoringTarget
 from app.services.checker import CheckOutcome, HttpChecker
 from app.services.incidents import CheckProcessingResult, record_check
+from app.services.notifications import WebhookDispatcher
 from app.services.url_policy import UnsafeURLError, validate_target_url
 from app.timeutil import utcnow
 
@@ -43,11 +44,13 @@ class MonitorEngine:
         settings: Settings,
         *,
         clock: Callable[[], datetime] = utcnow,
+        dispatcher: WebhookDispatcher | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._checker = checker
         self._settings = settings
         self._clock = clock
+        self._dispatcher = dispatcher
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
@@ -94,6 +97,12 @@ class MonitorEngine:
                 self.run_once()
             except Exception:
                 logger.exception("Monitoring cycle failed")
+            # Deliver on every tick, not only when checks ran, so retries happen on time.
+            if self._dispatcher is not None:
+                try:
+                    self._dispatcher.deliver_due()
+                except Exception:
+                    logger.exception("Notification delivery cycle failed")
             self._stop_event.wait(self._settings.monitor_tick_seconds)
 
     def find_due_targets(self, now: datetime) -> list[tuple[uuid.UUID, str]]:
@@ -121,7 +130,7 @@ class MonitorEngine:
     def check_target(self, target_id: uuid.UUID, url: str) -> CheckProcessingResult | None:
         checked_at = self._clock()
         try:
-            validate_target_url(url, self._settings.allowed_hosts)
+            validate_target_url(url, self._settings.allowed_hosts, self._settings.allowed_networks)
         except UnsafeURLError as exc:
             outcome = CheckOutcome(success=False, error=f"Blocked by URL policy: {exc}")
         else:
@@ -141,6 +150,7 @@ class MonitorEngine:
                     checked_at=checked_at,
                     failure_threshold=self._settings.failure_threshold,
                     recovery_threshold=self._settings.recovery_threshold,
+                    emit_events=self._settings.notifications_enabled,
                 )
         except SQLAlchemyError:
             logger.exception("Failed to persist check result for target %s", target_id)

@@ -19,6 +19,11 @@ from sqlalchemy.orm import Session
 
 from app.models import Incident, IncidentStatus, MonitoringResult, MonitoringTarget, TargetStatus
 from app.services.checker import MAX_ERROR_LENGTH, CheckOutcome
+from app.services.notifications import (
+    EVENT_INCIDENT_OPENED,
+    EVENT_INCIDENT_RESOLVED,
+    enqueue_incident_event,
+)
 
 
 @dataclass
@@ -50,8 +55,12 @@ def record_check(
     checked_at: datetime,
     failure_threshold: int = 2,
     recovery_threshold: int = 2,
+    emit_events: bool = False,
 ) -> CheckProcessingResult:
-    """Persist a check outcome and apply the incident rules. The caller commits."""
+    """Persist a check outcome and apply the incident rules. The caller commits.
+
+    With `emit_events`, opened/resolved incidents also get a webhook outbox row.
+    """
     result = MonitoringResult(
         target_id=target.id,
         checked_at=checked_at,
@@ -89,6 +98,7 @@ def record_check(
             target.status = TargetStatus.DOWN
             if open_incident is None:
                 incident = Incident(
+                    id=uuid.uuid4(),
                     target_id=target.id,
                     target_name=target.name,
                     status=IncidentStatus.OPEN,
@@ -97,5 +107,20 @@ def record_check(
                 )
                 session.add(incident)
                 processing.opened_incident = incident
+
+    if emit_events:
+        # Same transaction as the incident change: the outbox row commits with it or not at all.
+        if processing.opened_incident is not None:
+            enqueue_incident_event(
+                session, EVENT_INCIDENT_OPENED, processing.opened_incident, target, now=checked_at
+            )
+        if processing.resolved_incident is not None:
+            enqueue_incident_event(
+                session,
+                EVENT_INCIDENT_RESOLVED,
+                processing.resolved_incident,
+                target,
+                now=checked_at,
+            )
 
     return processing

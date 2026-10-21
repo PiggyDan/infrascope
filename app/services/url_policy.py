@@ -1,7 +1,13 @@
-"""SSRF protection: decides which URLs the monitor is allowed to contact.
+"""SSRF protection: decides which URLs the monitor (and webhooks) may contact.
 
 The same policy is applied when a target is registered/updated *and* again right
-before every check, so a changed allowlist takes effect immediately.
+before every request, so a changed allowlist takes effect immediately.
+
+Destinations must be either
+- a hostname on the explicit hostname allowlist, or
+- an IP address inside an explicitly allowlisted network (opt-in), and never a
+  loopback, link-local (incl. cloud metadata 169.254.169.254), multicast,
+  unspecified or reserved address, even if an allowlisted range contains it.
 """
 
 import ipaddress
@@ -13,23 +19,41 @@ import httpx
 ALLOWED_SCHEMES = frozenset({"http", "https"})
 _FORBIDDEN_CHARS = re.compile(r"[\s\\\x00-\x1f\x7f]")
 
+IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
+IPNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
+
 
 class UnsafeURLError(ValueError):
-    """Raised when a URL violates the monitoring destination policy."""
+    """Raised when a URL violates the destination policy."""
 
 
-def _is_ip_literal(host: str) -> bool:
+def _parse_ip(host: str) -> IPAddress | None:
     try:
-        ipaddress.ip_address(host)
+        return ipaddress.ip_address(host)
     except ValueError:
-        return False
-    return True
+        return None
 
 
-def validate_target_url(raw_url: str, allowed_hosts: Collection[str]) -> str:
-    """Validate a monitoring URL and return its normalized form.
+def _never_allowed(ip: IPAddress) -> str | None:
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped  # judge ::ffff:127.0.0.1 as 127.0.0.1
+    if ip.is_loopback:
+        return "loopback addresses are never allowed"
+    if ip.is_link_local:
+        return "link-local addresses (incl. cloud metadata) are never allowed"
+    if ip.is_multicast or ip.is_unspecified or ip.is_reserved:
+        return "multicast, unspecified and reserved addresses are never allowed"
+    return None
 
-    Parsing is done with httpx — the same parser that performs the request — so
+
+def validate_target_url(
+    raw_url: str,
+    allowed_hosts: Collection[str],
+    allowed_networks: Collection[IPNetwork] = (),
+) -> str:
+    """Validate a destination URL and return its normalized form.
+
+    Parsing is done with httpx, the same parser that performs the request, so
     there is no parser differential between validation and use.
     """
     if _FORBIDDEN_CHARS.search(raw_url):
@@ -48,9 +72,17 @@ def validate_target_url(raw_url: str, allowed_hosts: Collection[str]) -> str:
     host = url.host.lower()
     if not host:
         raise UnsafeURLError("URL must include a hostname")
-    if _is_ip_literal(host):
-        raise UnsafeURLError("IP address destinations are not allowed; use an allowlisted hostname")
-    if host not in allowed_hosts:
+
+    ip = _parse_ip(host)
+    if ip is not None:
+        if (reason := _never_allowed(ip)) is not None:
+            raise UnsafeURLError(reason)
+        if not any(ip in network for network in allowed_networks):
+            raise UnsafeURLError(
+                "IP address destinations are not allowed unless the address is inside "
+                "ALLOWED_TARGET_NETWORKS; prefer an allowlisted hostname"
+            )
+    elif host not in allowed_hosts:
         raise UnsafeURLError(f"host '{host}' is not in the monitoring allowlist")
 
     return str(url.copy_with(fragment=None))

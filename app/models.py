@@ -7,6 +7,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     CheckConstraint,
     Enum,
@@ -41,6 +42,12 @@ class TargetStatus(enum.StrEnum):
 class IncidentStatus(enum.StrEnum):
     OPEN = "OPEN"
     RESOLVED = "RESOLVED"
+
+
+class NotificationStatus(enum.StrEnum):
+    PENDING = "PENDING"
+    DELIVERED = "DELIVERED"
+    FAILED = "FAILED"  # gave up after the maximum number of attempts
 
 
 class ApiKeyRole(enum.StrEnum):
@@ -142,6 +149,39 @@ class Incident(Base):
     resolution_reason: Mapped[str | None] = mapped_column(String(200))
 
     target: Mapped[MonitoringTarget | None] = relationship(back_populates="incidents")
+
+
+class NotificationEvent(Base):
+    """Transactional outbox for webhooks.
+
+    Written in the same transaction as the incident change it describes, so an
+    incident can never be committed without its notification (or vice versa).
+    A dispatcher delivers pending rows with retries.
+    """
+
+    __tablename__ = "notification_events"
+    __table_args__ = (
+        Index("ix_notification_events_status_next_attempt", "status", "next_attempt_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    event_type: Mapped[str] = mapped_column(String(32))
+    incident_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("incidents.id", ondelete="SET NULL"), index=True
+    )
+    payload: Mapped[dict] = mapped_column(JSON)
+    status: Mapped[NotificationStatus] = mapped_column(
+        _enum_column(NotificationStatus, "notification_status"), default=NotificationStatus.PENDING
+    )
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    next_attempt_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    delivered_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    last_status_code: Mapped[int | None] = mapped_column(Integer)
+    last_error: Mapped[str | None] = mapped_column(String(500))
+
+    # Lets the unit of work insert a new incident before the event that references it.
+    incident: Mapped[Incident | None] = relationship(passive_deletes=True)
 
 
 class ApiKey(Base):

@@ -81,11 +81,14 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Create .env with a random database password
+      - name: Create .env (random DB password; webhooks to the test receiver)
         run: |
-          pw=$(openssl rand -hex 24)
-          echo "::add-mask::$pw"
-          sed "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$pw/" .env.example > .env
+          pw=$(openssl rand -hex 24); echo "::add-mask::$pw"
+          whsec=$(openssl rand -hex 24); echo "::add-mask::$whsec"
+          sed -e "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$pw/" \
+              -e "s#^NOTIFY_WEBHOOK_URL=.*#NOTIFY_WEBHOOK_URL=http://testtarget:8080/webhook#" \
+              -e "s/^NOTIFY_WEBHOOK_SECRET=.*/NOTIFY_WEBHOOK_SECRET=$whsec/" .env.example > .env
+          echo "WEBHOOK_SECRET=$whsec" >> "$GITHUB_ENV"
       - name: Build and start the stack
         run: docker compose up -d --build --wait
       - name: Create a temporary ADMIN key
@@ -96,6 +99,30 @@ jobs:
       - name: Smoke test (outage → incident → recovery → restart persistence)
         shell: pwsh
         run: ./scripts/smoke-test.ps1 -VerifyRestart
+      - name: Incident webhooks were delivered and correctly signed
+        run: |
+          docker compose exec -T -e WEBHOOK_SECRET api python - <<'EOF'
+          import json, os, time, httpx
+          from app.services.notifications import verify_signature
+          deadline = time.time() + 30
+          while time.time() < deadline:
+              hits = httpx.get("http://testtarget:8080/webhook/received").json()
+              types = {h["headers"].get("x-infrascope-event") for h in hits}
+              if {"incident.opened", "incident.resolved"} <= types:
+                  break
+              time.sleep(1)
+          else:
+              raise SystemExit(f"expected opened+resolved webhooks, got {types}")
+          secret = os.environ["WEBHOOK_SECRET"]
+          for h in hits:
+              hd = h["headers"]
+              ok = verify_signature(secret, hd["x-infrascope-timestamp"], h["body"].encode(),
+                                    hd["x-infrascope-signature"])
+              assert ok, f"bad signature on {hd['x-infrascope-event']}"
+              body = json.loads(h["body"])
+              assert body["event_id"] == hd["x-infrascope-event-id"]
+          print(f"{len(hits)} webhooks received, all signatures valid: {sorted(types)}")
+          EOF
       - name: Test suite inside the API container
         run: docker compose exec -T api pytest -q
       - name: Dashboard and security checks

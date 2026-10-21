@@ -11,6 +11,7 @@ from app.config import Settings
 from app.models import MonitoringResult, MonitoringTarget, TargetStatus
 from app.schemas import ResultRead, TargetCreate, TargetRead, TargetUpdate
 from app.services.incidents import get_open_incident, resolve_incident
+from app.services.notifications import EVENT_INCIDENT_RESOLVED, enqueue_incident_event
 from app.services.url_policy import UnsafeURLError, validate_target_url
 from app.timeutil import utcnow
 
@@ -25,7 +26,7 @@ DUPLICATE_MESSAGE = "A target with the same {field} already exists"
 
 def _validated_url(url: str, settings: Settings) -> str:
     try:
-        return validate_target_url(url, settings.allowed_hosts)
+        return validate_target_url(url, settings.allowed_hosts, settings.allowed_networks)
     except UnsafeURLError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"URL rejected: {exc}"
@@ -154,11 +155,18 @@ def update_target(
     dependencies=ADMIN_ONLY,
     summary="Delete a target (its incident history is preserved)",
 )
-def delete_target(target_id: uuid.UUID, session: Session = Depends(get_session)):
+def delete_target(
+    target_id: uuid.UUID,
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_app_settings),
+):
     target = _get_target_or_404(session, target_id)
     open_incident = get_open_incident(session, target.id)
     if open_incident is not None:
-        resolve_incident(open_incident, resolved_at=utcnow(), reason="Target deleted")
+        now = utcnow()
+        resolve_incident(open_incident, resolved_at=now, reason="Target deleted")
+        if settings.notifications_enabled:
+            enqueue_incident_event(session, EVENT_INCIDENT_RESOLVED, open_incident, target, now=now)
     session.delete(target)
     session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

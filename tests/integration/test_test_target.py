@@ -4,6 +4,7 @@ Runs when INFRASCOPE_TEST_TARGET_URL is set, e.g. inside Compose:
     docker compose exec api pytest -m integration
 """
 
+import json
 import os
 
 import httpx
@@ -14,9 +15,17 @@ from sqlalchemy import select
 from app.api.auth import API_KEY_HEADER
 from app.db import Base
 from app.main import create_app
-from app.models import Incident, IncidentStatus, MonitoringResult
+from app.models import (
+    Incident,
+    IncidentStatus,
+    MonitoringResult,
+    NotificationEvent,
+    NotificationStatus,
+)
 from app.services.checker import HttpChecker
 from app.services.monitor import MonitorEngine
+from app.services.notifications import WebhookDispatcher, enqueue_test_event, verify_signature
+from app.timeutil import utcnow
 from tests.conftest import FakeClock, create_key, make_settings
 
 BASE_URL = os.environ.get("INFRASCOPE_TEST_TARGET_URL", "").rstrip("/")
@@ -57,6 +66,64 @@ def test_slow_endpoint_times_out(checker):
     outcome = checker.check(f"{BASE_URL}/slow?delay=3")
     assert outcome.success is False
     assert outcome.error == "Timeout after 2s"
+
+
+def test_signed_webhook_delivered_to_real_receiver(tmp_path):
+    """Deliver over real HTTP, then verify the signature exactly as a receiver would."""
+    from tests.conftest import database_url_for
+
+    secret = "integration-webhook-secret"
+    host = httpx.URL(BASE_URL).host
+    base_settings = make_settings(
+        database_url_for(tmp_path),
+        allowed_target_hosts=host,
+        notify_webhook_url=f"{BASE_URL}/webhook",
+        notify_webhook_secret=secret,
+    )
+    app = create_app(base_settings)
+    Base.metadata.drop_all(app.state.db_engine)
+    Base.metadata.create_all(app.state.db_engine)
+    session_factory = app.state.session_factory
+    httpx.delete(f"{BASE_URL}/webhook/received")
+
+    def deliver_one(settings):
+        with session_factory() as session:
+            event_id = enqueue_test_event(session, now=utcnow()).id
+            session.commit()
+        dispatcher = WebhookDispatcher(session_factory, settings)
+        try:
+            dispatcher.deliver_due()
+        finally:
+            dispatcher.close()
+        with session_factory() as session:
+            return session.get(NotificationEvent, event_id)
+
+    try:
+        delivered = deliver_one(base_settings)
+        assert delivered.status == NotificationStatus.DELIVERED
+        [hit] = [
+            r
+            for r in httpx.get(f"{BASE_URL}/webhook/received").json()
+            if json.loads(r["body"])["event_id"] == str(delivered.id)
+        ]
+        headers = hit["headers"]
+        assert headers["x-infrascope-event"] == "test"
+        assert verify_signature(
+            secret,
+            headers["x-infrascope-timestamp"],
+            hit["body"].encode("utf-8"),
+            headers["x-infrascope-signature"],
+        )
+
+        # A receiver error is recorded and the event stays queued for retry.
+        failing = base_settings.model_copy(
+            update={"notify_webhook_url": f"{BASE_URL}/webhook/fail"}
+        )
+        retried = deliver_one(failing)
+        assert retried.status == NotificationStatus.PENDING
+        assert retried.last_status_code == 500 and retried.attempts == 1
+    finally:
+        app.state.db_engine.dispose()
 
 
 def test_end_to_end_outage_and_recovery(tmp_path):

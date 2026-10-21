@@ -10,6 +10,7 @@ from app.models import (
     MIN_INTERVAL_SECONDS,
     ApiKeyRole,
     IncidentStatus,
+    NotificationStatus,
     TargetStatus,
     TargetType,
 )
@@ -117,6 +118,31 @@ class ApiKeyRead(BaseModel):
 
 class ApiKeyCreated(ApiKeyRead):
     key: str = Field(description="The secret. Shown only in this response; store it securely.")
+
+
+class NotificationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    event_type: str
+    incident_id: uuid.UUID | None
+    status: NotificationStatus
+    attempts: int
+    created_at: datetime
+    next_attempt_at: datetime
+    delivered_at: datetime | None
+    last_status_code: int | None
+    last_error: str | None
+    payload: dict
+
+
+class NotificationConfigRead(BaseModel):
+    enabled: bool
+    destination_host: str | None = Field(
+        description="Host of the webhook URL (the full URL may contain a token and is not shown)"
+    )
+    signed: bool
+    max_attempts: int
 
 
 class HealthRead(BaseModel):

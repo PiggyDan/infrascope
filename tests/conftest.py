@@ -30,12 +30,20 @@ def database_url_for(tmp_path) -> str:
 
 
 def make_settings(database_url: str, **overrides) -> Settings:
+    # Pin every field the environment could set (e.g. inside the Compose container, where
+    # NOTIFY_WEBHOOK_URL is configured), so tests never depend on the host's settings.
     values = {
         "database_url": database_url,
         "monitor_enabled": False,
         "allowed_target_hosts": "testtarget",
+        "allowed_target_networks": "",
         "monitor_tick_seconds": 0.05,
         "http_timeout_seconds": 2.0,
+        "failure_threshold": 2,
+        "recovery_threshold": 2,
+        "notify_webhook_url": None,
+        "notify_webhook_secret": None,
+        "notify_max_attempts": 8,
     }
     values.update(overrides)
     return Settings(_env_file=None, **values)

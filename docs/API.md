@@ -157,6 +157,18 @@ Revokes the key immediately; revoking an already-revoked key is a no-op `204`. R
 if it is the last active ADMIN key, so you can't lock yourself out. (The CLI
 `revoke-api-key` has no such guard: it's the recovery path.)
 
+## Notifications (ADMIN)
+
+Incident webhooks; configuration, payload format and signature verification are in
+[INTEGRATIONS.md](INTEGRATIONS.md).
+
+| Endpoint | Returns |
+|---|---|
+| `GET /api/v1/notifications/config` | `enabled`, `destination_host` (never the full URL, which may hold a token), `signed`, `max_attempts` |
+| `GET /api/v1/notifications?status=PENDING\|DELIVERED\|FAILED&limit=50` | Recent events with delivery state: `attempts`, `next_attempt_at`, `delivered_at`, `last_status_code`, `last_error`, `payload` |
+| `POST /api/v1/notifications/test` → `202` | Queues a `test` event (delivered within about a second); `409` if webhooks are disabled |
+| `POST /api/v1/notifications/{id}/retry` | Re-queues a pending/failed event; `409` if already delivered |
+
 ## Test target service (internal only)
 
 Reachable only from the Compose network at `http://testtarget:8080`:
@@ -166,3 +178,6 @@ Reachable only from the Compose network at `http://testtarget:8080`:
 | `GET /healthy` | `200 {"status":"healthy"}` |
 | `GET /unhealthy` | `503 {"status":"unhealthy"}` |
 | `GET /slow` | `200` after `SLOW_DELAY_SECONDS` (default 3); `?delay=0..30` overrides |
+| `POST /webhook` | `200`; records the request (webhook receiver for tests) |
+| `POST /webhook/fail` | `500`; records the request (to exercise retries) |
+| `GET /webhook/received` / `DELETE` | The last 50 recorded requests / clear them |

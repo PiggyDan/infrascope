@@ -33,6 +33,9 @@ resolves incidents automatically.
 - Web dashboard (React + TypeScript): live summary, targets (add / pause / delete for ADMIN),
   response-time chart with hover/keyboard readout, check history, incidents. Light and dark
   mode, works at phone width
+- Signed incident webhooks (HMAC-SHA256, replay-protected) with a transactional outbox and
+  retries, ready for ticketing systems and internal portals. See
+  [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md)
 - Docker Compose stack: API, PostgreSQL, the dashboard (nginx) and a local test-target service
 - 141 pytest tests, incl. integration tests against the real test-target service and a check
   that every non-public route requires a key
@@ -187,7 +190,11 @@ uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000
 | Variable | Default | Purpose |
 |---|---|---|
 | `DATABASE_URL` | *(required)* | SQLAlchemy URL; Compose builds it from `POSTGRES_*` |
-| `ALLOWED_TARGET_HOSTS` | `testtarget` | Comma-separated hostnames the monitor may contact |
+| `ALLOWED_TARGET_HOSTS` | `testtarget` | Comma-separated hostnames the monitor and webhooks may contact |
+| `ALLOWED_TARGET_NETWORKS` | *(empty)* | Opt-in IPs/ranges, e.g. `10.20.0.15/32` (/16 or narrower; loopback, link-local and metadata IPs always refused) |
+| `NOTIFY_WEBHOOK_URL` | *(empty = off)* | Where incident webhooks are POSTed |
+| `NOTIFY_WEBHOOK_SECRET` | *(empty = unsigned)* | HMAC-SHA256 signing key for webhooks |
+| `API_BIND` | `127.0.0.1` | Interface the API is published on; change only behind TLS + firewall |
 | `MONITOR_ENABLED` | `true` | Run the background monitor |
 | `MONITOR_TICK_SECONDS` | `1` | How often the scheduler looks for due targets |
 | `HTTP_TIMEOUT_SECONDS` | `5` | Per-check timeout |
@@ -268,8 +275,8 @@ Deliberate Day 1–3 trade-offs, and how I'd lift each one:
   then pin the connection to the vetted IP (defeats DNS rebinding).
 - **More check types.** TCP connect, DNS resolution, TLS certificate expiry, keyword match on
   the response body. The `TargetType` enum and checker interface are the extension points.
-- **Notifications.** Webhook / Slack / e-mail on incident open and resolve, with per-target
-  routing and an escalation delay.
+- **More notification channels.** Webhooks are done; next come Slack / e-mail adapters,
+  per-target routing and an escalation delay.
 - **Hardening for real deployment.** TLS at the proxy, rate limiting on failed
   authentication, audit log of key usage and changes, per-user identities (OIDC) instead of
   shared keys, and the database password in a secret manager.

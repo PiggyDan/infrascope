@@ -54,5 +54,5 @@ Grouped minor/patch PRs per ecosystem, grouped frontend-toolchain majors, 14-day
 - `gh` CLI is not logged in, so CI results on GitHub could not be read from this machine.
 
 ## Next
-Decide the direction: ITCore integration (start with ITCore as a monitored target), or
+Decide the direction: integration with an internal IT portal (start by monitoring it), or
 portfolio polish (demo GIF, About/topics, public visibility).
