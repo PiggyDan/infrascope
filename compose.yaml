@@ -50,6 +50,17 @@ services:
       - "127.0.0.1:${API_PORT:-8000}:8000"
     networks: [backend, edge]
 
+  web:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${WEB_PORT:-3000}:8080"
+    # Only needs to reach the API; never the database or test target.
+    networks: [edge]
+
 networks:
   # internal: containers on this network have no route to the internet or LAN.
   backend:

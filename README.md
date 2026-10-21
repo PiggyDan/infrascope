@@ -4,8 +4,16 @@ Open-source infrastructure monitoring and incident detection. InfraScope checks 
 endpoints on a schedule, stores every real measurement in PostgreSQL, and opens and
 resolves incidents automatically.
 
-> **Status:** backend MVP with API-key authentication (Day 2). Dashboard in progress.
+> **Status:** monitoring backend, API-key authentication and a web dashboard.
 > Progress logs: [Day 1](docs/DAY1_PROGRESS.md) · [Day 2](docs/DAY2_PROGRESS.md).
+
+![InfraScope dashboard: summary tiles, targets with status, incident history, and a response-time chart for a failing target](docs/images/dashboard-light.png)
+
+<details>
+<summary>Dark mode</summary>
+
+![InfraScope dashboard in dark mode](docs/images/dashboard-dark.png)
+</details>
 
 ## Features
 
@@ -16,16 +24,22 @@ resolves incidents automatically.
 - PostgreSQL 16 with Alembic migrations, UUID keys, UTC timestamps
 - SSRF protection: only allowlisted hostnames; no IPs, credentials or redirects
 - API-key authentication with `VIEWER` / `ADMIN` roles; keys stored as SHA-256 hashes, shown once
-- Docker Compose stack: API, PostgreSQL and a local test-target service
+- Web dashboard (React + TypeScript): live summary, targets (add / pause / delete for ADMIN),
+  response-time chart with hover/keyboard readout, check history, incidents. Light and dark
+  mode, works at phone width
+- Docker Compose stack: API, PostgreSQL, the dashboard (nginx) and a local test-target service
 - 141 pytest tests, incl. integration tests against the real test-target service and a check
   that every non-public route requires a key
 
 ```mermaid
 flowchart LR
-    user["Developer<br/>(127.0.0.1 only)"] -->|"HTTP :8000"| api
+    user["Browser<br/>(127.0.0.1 only)"] -->|"dashboard :3000"| web
+    user -->|"API :8000"| api
     subgraph compose["Docker Compose"]
         subgraph edge["edge network"]
+            web["web<br/>nginx + React build"]
             api["api<br/>FastAPI + monitor thread"]
+            web -->|"/api proxy"| api
         end
         subgraph backend["backend network (internal: no internet/LAN)"]
             db[("db<br/>PostgreSQL 16<br/>volume: pgdata")]
@@ -79,7 +93,8 @@ Invoke-RestMethod "http://127.0.0.1:8000/api/v1/targets/$($t.id)/results" -Heade
 Invoke-RestMethod http://127.0.0.1:8000/api/v1/summary -Headers $h
 ```
 
-In the browser, open <http://127.0.0.1:8000/docs>, click **Authorize**, and paste the key.
+**Dashboard:** open <http://127.0.0.1:3000> and paste the key. **API docs:**
+<http://127.0.0.1:8000/docs>; click **Authorize** and paste the key.
 
 Full outage → incident → recovery demo, plus a restart-persistence check (uses `$env:INFRASCOPE_API_KEY`):
 
@@ -128,6 +143,26 @@ $env:INFRASCOPE_TEST_TARGET_URL = "http://localhost:8081"
 python -m pytest -m integration -v
 ```
 
+Frontend tests and type-check (Node 22+):
+
+```powershell
+cd frontend
+npm ci
+npm test            # Vitest: formatters, chart geometry, API client
+npm run typecheck
+```
+
+## Dashboard development
+
+With the Compose stack running, start Vite with hot reload. It proxies `/api` to
+`127.0.0.1:8000`, the same single-origin setup as production:
+
+```powershell
+cd frontend
+npm ci
+npm run dev         # http://127.0.0.1:5173
+```
+
 ## Running the API locally without Docker
 
 Useful for debugging. Uses a local SQLite file, not PostgreSQL:
@@ -152,7 +187,8 @@ uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000
 | `HTTP_TIMEOUT_SECONDS` | `5` | Per-check timeout |
 | `FAILURE_THRESHOLD` | `2` | Consecutive failures before DOWN + incident |
 | `RECOVERY_THRESHOLD` | `2` | Consecutive successes before an incident is resolved |
-| `API_PORT` | `8000` | Host port (always bound to `127.0.0.1`) |
+| `API_PORT` | `8000` | API host port (always bound to `127.0.0.1`) |
+| `WEB_PORT` | `3000` | Dashboard host port (always bound to `127.0.0.1`) |
 | `SLOW_DELAY_SECONDS` | `3` | Default delay of the test target's `/slow` |
 
 ## Security model
@@ -162,8 +198,13 @@ uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000
   random tokens, stored only as SHA-256 hashes, and can expire or be revoked. The API refuses
   to revoke the last active ADMIN key (the CLI can, as a recovery path).
 
-- Only the API port is published, and only on `127.0.0.1`. PostgreSQL and the test target have
-  no host ports and sit on an `internal` Docker network with no outbound route.
+- Only the API and dashboard ports are published, and only on `127.0.0.1`. PostgreSQL and the
+  test target have no host ports and sit on an `internal` Docker network with no outbound route.
+  The dashboard container is on a separate network and cannot reach the database.
+- The dashboard is served with a strict Content-Security-Policy (own scripts and styles only,
+  no inline scripts, no third parties), `X-Frame-Options: DENY`, `nosniff` and
+  `no-referrer`. The API key is kept in `sessionStorage`: it survives a reload and is cleared
+  when the tab closes.
 - Monitored URLs must use `http`/`https` and an **allowlisted hostname**. IP literals
   (private, public, loopback, link-local/metadata), embedded credentials, whitespace,
   backslashes and control characters are rejected. The policy is checked at registration
@@ -183,7 +224,8 @@ uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000
 | `docker compose ps` shows `5432/tcp` but port 5432 answers on the host | That's another PostgreSQL on your machine, not InfraScope's. `docker port infrascope-db-1` should print nothing. |
 | `required variable POSTGRES_PASSWORD is missing` | You skipped `Copy-Item .env.example .env`. |
 | `api` stays `starting`/`unhealthy` | `docker compose logs api`; usually a DB password mismatch. If you changed `POSTGRES_PASSWORD` after the first start, the existing volume still has the old one. Restore it, or wipe with `docker compose down -v` (deletes data). |
-| Port 8000 already in use | Set `API_PORT=8001` in `.env`, then `docker compose up -d`. |
+| Port 8000 or 3000 already in use | Set `API_PORT` / `WEB_PORT` in `.env`, then `docker compose up -d`. |
+| Dashboard sends you back to sign-in | Your key was revoked or expired (any 401 signs you out). Create a new one. |
 | `401 Missing X-API-Key header` / `Invalid, expired or revoked API key` | Create a key with the CLI command above and send it as `X-API-Key`. |
 | `403 This action requires an ADMIN key` | You're using a VIEWER key for a write. |
 | Lost every ADMIN key | `docker compose exec api python -m app.cli create-api-key --name admin --role ADMIN` |
@@ -209,6 +251,9 @@ app/
     incidents.py       Incident rules (scheduler-independent)
     monitor.py         Background scheduler thread
 migrations/            Alembic
+frontend/              React + TypeScript dashboard (Vite), nginx config, own image
+  src/components/      Dashboard, targets, detail + chart, incidents, login
+  src/chart.ts         Pure chart geometry (unit-tested)
 testtarget/            Local test HTTP service (own image)
 tests/                 Unit tests + tests/integration
 scripts/smoke-test.ps1 End-to-end check incl. restart persistence
