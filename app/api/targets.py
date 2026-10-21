@@ -28,7 +28,7 @@ def _validated_url(url: str, settings: Settings) -> str:
         return validate_target_url(url, settings.allowed_hosts)
     except UnsafeURLError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"URL rejected: {exc}"
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"URL rejected: {exc}"
         ) from exc
 
 

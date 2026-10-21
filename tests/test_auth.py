@@ -25,18 +25,40 @@ def _concrete(path: str) -> str:
     return path.replace("{target_id}", str(uuid.uuid4())).replace("{key_id}", str(uuid.uuid4()))
 
 
+def _api_routes(routes) -> list[APIRoute]:
+    """All APIRoutes, whether FastAPI flattens included routers (<0.140) or nests them
+    (newer versions keep an `_IncludedRouter` whose `original_router` holds the routes)."""
+    found: list[APIRoute] = []
+    for route in routes:
+        if isinstance(route, APIRoute):
+            found.append(route)
+        elif (nested := getattr(route, "original_router", None)) is not None:
+            found.extend(_api_routes(nested.routes))
+    return found
+
+
 def test_every_non_public_route_requires_a_key(app, anon_client):
     """Guards future routes too: anything not explicitly public must return 401."""
-    checked = 0
-    for route in app.routes:
-        if not isinstance(route, APIRoute) or route.path in PUBLIC_PATHS:
+    probed: set[tuple[str, str]] = set()
+    for route in _api_routes(app.routes):
+        if route.path in PUBLIC_PATHS:
             continue
         for method in route.methods - {"HEAD", "OPTIONS"}:
             response = anon_client.request(method, _concrete(route.path), json={})
             assert response.status_code == 401, f"{method} {route.path} is not protected"
             assert response.headers["www-authenticate"] == "ApiKey"
-            checked += 1
-    assert checked >= 10
+            probed.add((method, route.path))
+
+    # Cross-check with the public OpenAPI schema so a change in FastAPI's route
+    # internals makes this test fail loudly instead of silently checking nothing.
+    documented = {
+        (method.upper(), path)
+        for path, operations in app.openapi()["paths"].items()
+        if path not in PUBLIC_PATHS
+        for method in operations
+    }
+    assert documented, "OpenAPI lists no protected operations"
+    assert documented <= probed, f"Routes not probed: {sorted(documented - probed)}"
 
 
 def test_public_endpoints_need_no_key(anon_client):
