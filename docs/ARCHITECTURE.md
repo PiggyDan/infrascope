@@ -148,6 +148,22 @@ erDiagram
 - `tests/test_persistence.py` runs Alembic upgrade/downgrade and asserts there is no drift
   between the models and the migration.
 
+## Dashboard (`frontend/`)
+
+- React 18 + TypeScript, built by Vite into static files served by an unprivileged nginx
+  container (`web`). nginx also reverse-proxies `/api/` and `/health` to `api:8000`, so the
+  browser only ever talks to one origin and no CORS configuration exists. In development,
+  Vite's proxy reproduces the same setup.
+- Data refreshes by polling every 5 s, paused while the tab is hidden. Previous data stays on
+  screen during a refetch (no flashing). Any 401 signs the user out.
+- Write controls (add, pause, delete) render only for ADMIN keys. The API enforces this
+  independently; the UI just avoids offering actions that would fail with 403.
+- The response-time chart is hand-built SVG, so there is no charting dependency. Geometry lives in
+  `src/chart.ts` (pure, unit-tested). Colors come from a validated palette: one series hue
+  plus the reserved status colors, CVD-checked in light and dark mode. Status is never color
+  alone (badges have an icon and a label). The chart supports hover and keyboard
+  (arrow keys) readout, and the check table under it is its text alternative.
+
 ## Security boundaries
 
 | Boundary | Control |
@@ -158,7 +174,9 @@ erDiagram
 | Containers → internet/LAN | `db` and `testtarget` are on an `internal: true` network |
 | API → monitored URL (SSRF) | Hostname allowlist; no IP literals, userinfo, non-HTTP schemes, control chars; checked on write **and** before every request; redirects disabled; `trust_env=False` |
 | Secrets | `.env` git-ignored; `DATABASE_URL` is a `SecretStr`; `httpx` request logging silenced |
-| Containers | Non-root users in both images |
+| Browser ↔ dashboard | Strict CSP (`script-src 'self'`, no inline scripts, `frame-ancestors 'none'`), `nosniff`, `no-referrer`; key in `sessionStorage` |
+| Dashboard → backend | `web` is only on the `edge` network: it can reach `api`, not `db` or `testtarget` |
+| Containers | Non-root users in all images |
 
 Residual risk: the allowlist trusts Docker's DNS for the allowlisted names. That is acceptable
 for a private Compose network, but must be revisited before monitoring external hosts (Day 2+:

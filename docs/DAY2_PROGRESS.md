@@ -27,8 +27,34 @@ Live state after verification: both temporary keys used for testing (`smoke-test
   `tests/conftest.py`, `tests/test_persistence.py`, `tests/test_monitor_engine.py`,
   `tests/integration/test_test_target.py`, `scripts/smoke-test.ps1`, README, API, ARCHITECTURE
 
-## Part 2 — Dashboard
-_Not started._
+## Part 2 — Dashboard ✅
+
+| Item | Status | Evidence |
+|---|---|---|
+| React + TS dashboard (Vite), pinned deps | ✅ | `npm audit --omit=dev`: 0 vulnerabilities |
+| Sign-in with API key; 401 → signed out | ✅ | seen live (an unset key fell back to sign-in) |
+| Summary tiles, targets table, incidents, target detail | ✅ | screenshots `docs/images/` |
+| ADMIN: add / pause / delete (inline confirm); VIEWER read-only | ✅ | UI hides writes; API enforces 403 |
+| Response-time chart: crosshair tooltip, keyboard, failure markers, end label, legend | ✅ | tooltip verified in headless Edge |
+| Palette validated (CVD/contrast) light + dark | ✅ | `validate_palette.js`: all checks pass both modes |
+| nginx container, same-origin `/api` proxy, strict CSP + security headers | ✅ | curl header check; no CSP violations in browser console |
+| `web` cannot reach `db` | ✅ | `wget db:5432` → bad address |
+| Light, dark, 400px phone rendering | ✅ | screenshots checked by eye; no page-level horizontal overflow |
+| Frontend tests | ✅ | **49 passed** (Vitest); `tsc` strict clean |
+
+Visual issues found from screenshots and fixed: check rows said "Down" (now "OK"/"Failed"),
+incident rows wrapped, "0.0%" uptime, clipped Delete column, redundant "HTTP 503" text,
+cramped phone URLs.
+
+Demo data left in the dev database: targets `demo-healthy`, `demo-slow`, `demo-unhealthy`
+(the last keeps an open incident on purpose, to show a failure). Pause or delete them from
+the dashboard.
+
+### Files (Part 2)
+- New: `frontend/` (package.json + lockfile, tsconfig, vite config, nginx.conf,
+  security-headers.conf, Dockerfile, `src/**`), `docs/images/dashboard-{light,dark}.png`
+- Changed: `compose.yaml` (web service), `.env.example` (`WEB_PORT`), `.gitignore`, README,
+  ARCHITECTURE
 
 ## Known problems / notes
 - No rate limiting on failed auth (256-bit keys make guessing infeasible; still worth adding
@@ -36,6 +62,12 @@ _Not started._
 - Plain HTTP; TLS needed before exposing beyond localhost.
 - Native PostgreSQL 13 on `0.0.0.0:5432` (outside this project, see Day 1 notes).
 
-## Next task
-Part 2: React + TypeScript dashboard (Vite), served by an nginx container on 127.0.0.1 that
-proxies `/api` to the backend (same origin, no CORS).
+## Live state at end of Day 2
+- Stack: `api`, `db`, `testtarget`, `web` all healthy; dashboard at http://127.0.0.1:3000.
+- API keys: all 5 temporary keys created for verification are **revoked**; 0 active. The
+  owner creates their own with the CLI.
+
+## Next task (Day 3)
+1. GitHub Actions CI: ruff + pytest (with a PostgreSQL service) + frontend tsc/vitest/build.
+2. README polish for reviewers: CI badge, "what I'd do next" section.
+3. Optional: rate limiting on failed auth; results retention.

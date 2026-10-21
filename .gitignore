@@ -12,6 +12,11 @@ venv/
 .ruff_cache/
 *.egg-info/
 
+# Frontend
+node_modules/
+frontend/dist/
+*.tsbuildinfo
+
 # Local databases
 *.db
 *.sqlite3
