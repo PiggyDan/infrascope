@@ -5,6 +5,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.api.auth import require_admin, require_viewer
 from app.api.deps import get_app_settings, get_session
 from app.config import Settings
 from app.models import MonitoringResult, MonitoringTarget, TargetStatus
@@ -13,7 +14,11 @@ from app.services.incidents import get_open_incident, resolve_incident
 from app.services.url_policy import UnsafeURLError, validate_target_url
 from app.timeutil import utcnow
 
-router = APIRouter(prefix="/api/v1/targets", tags=["targets"])
+# Reads need any valid key; write routes additionally declare require_admin.
+router = APIRouter(
+    prefix="/api/v1/targets", tags=["targets"], dependencies=[Depends(require_viewer)]
+)
+ADMIN_ONLY = [Depends(require_admin)]
 
 DUPLICATE_MESSAGE = "A target with the same {field} already exists"
 
@@ -86,6 +91,7 @@ def list_targets(
     "",
     response_model=TargetRead,
     status_code=status.HTTP_201_CREATED,
+    dependencies=ADMIN_ONLY,
     summary="Register a monitoring target",
     responses={409: {"description": "Duplicate name or URL"}, 422: {"description": "Invalid"}},
 )
@@ -116,6 +122,7 @@ def get_target(target_id: uuid.UUID, session: Session = Depends(get_session)):
 @router.patch(
     "/{target_id}",
     response_model=TargetRead,
+    dependencies=ADMIN_ONLY,
     summary="Update a target (including enable/disable)",
     responses={404: {"description": "Not found"}, 409: {"description": "Duplicate"}},
 )
@@ -144,6 +151,7 @@ def update_target(
 @router.delete(
     "/{target_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=ADMIN_ONLY,
     summary="Delete a target (its incident history is preserved)",
 )
 def delete_target(target_id: uuid.UUID, session: Session = Depends(get_session)):

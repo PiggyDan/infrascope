@@ -11,19 +11,22 @@ from alembic.migration import MigrationContext
 from fastapi.testclient import TestClient
 from sqlalchemy import inspect, text
 
+from app.api.auth import API_KEY_HEADER
 from app.db import Base, create_db_engine
 from app.main import create_app
 from app.models import MonitoringTarget
 from app.services.checker import CheckOutcome
 from app.services.incidents import record_check
 from app.timeutil import utcnow
+from tests.conftest import create_key
 
 
 def test_data_survives_application_restart(settings):
     first = create_app(settings)
     Base.metadata.drop_all(first.state.db_engine)
     Base.metadata.create_all(first.state.db_engine)
-    with TestClient(first) as client:
+    key = create_key(first.state.session_factory)
+    with TestClient(first, headers={API_KEY_HEADER: key}) as client:
         target_id = client.post(
             "/api/v1/targets", json={"name": "persist", "url": "http://testtarget:8080/healthy"}
         ).json()["id"]
@@ -37,9 +40,9 @@ def test_data_survives_application_restart(settings):
         )
     first.state.db_engine.dispose()
 
-    # A brand-new app instance with a new engine and connection pool.
+    # A brand-new app instance with a new engine and connection pool; the API key persists too.
     second = create_app(settings)
-    with TestClient(second) as client:
+    with TestClient(second, headers={API_KEY_HEADER: key}) as client:
         target = client.get(f"/api/v1/targets/{target_id}").json()
         results = client.get(f"/api/v1/targets/{target_id}/results").json()
     assert target["name"] == "persist"

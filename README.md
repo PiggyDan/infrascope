@@ -4,11 +4,10 @@ Open-source infrastructure monitoring and incident detection. InfraScope checks 
 endpoints on a schedule, stores every real measurement in PostgreSQL, and opens and
 resolves incidents automatically.
 
-> **Day 1 status: backend MVP.** No frontend yet. The API has **no authentication**. It is a
-> localhost-only development API, and authentication/authorization are Day 2 requirements.
-> See [docs/DAY1_PROGRESS.md](docs/DAY1_PROGRESS.md) for exactly what has been verified.
+> **Status:** backend MVP with API-key authentication (Day 2). Dashboard in progress.
+> Progress logs: [Day 1](docs/DAY1_PROGRESS.md) · [Day 2](docs/DAY2_PROGRESS.md).
 
-## Features (Day 1)
+## Features
 
 - Target management REST API (create, list, get, update, enable/disable, delete)
 - Background HTTP monitor: real response times, status codes, timeouts and connection errors
@@ -16,8 +15,10 @@ resolves incidents automatically.
   no duplicate open incidents (enforced by a database index), history preserved
 - PostgreSQL 16 with Alembic migrations, UUID keys, UTC timestamps
 - SSRF protection: only allowlisted hostnames; no IPs, credentials or redirects
+- API-key authentication with `VIEWER` / `ADMIN` roles; keys stored as SHA-256 hashes, shown once
 - Docker Compose stack: API, PostgreSQL and a local test-target service
-- 120 pytest tests (115 unit + 5 integration against the real test-target service)
+- 141 pytest tests, incl. integration tests against the real test-target service and a check
+  that every non-public route requires a key
 
 ```mermaid
 flowchart LR
@@ -60,21 +61,34 @@ docker compose ps
 Invoke-RestMethod http://127.0.0.1:8000/health
 ```
 
+Create your first API key. The secret is printed **once**, so store it in a password manager:
+
+```powershell
+docker compose exec api python -m app.cli create-api-key --name admin --role ADMIN
+$env:INFRASCOPE_API_KEY = "isk_..."   # paste it for this terminal session
+```
+
 Register a target and watch it:
 
 ```powershell
+$h = @{ "X-API-Key" = $env:INFRASCOPE_API_KEY }
 $body = @{ name = "demo-healthy"; url = "http://testtarget:8080/healthy"; interval_seconds = 10 } | ConvertTo-Json
-$t = Invoke-RestMethod -Method Post http://127.0.0.1:8000/api/v1/targets -ContentType application/json -Body $body
+$t = Invoke-RestMethod -Method Post http://127.0.0.1:8000/api/v1/targets -Headers $h -ContentType application/json -Body $body
 Start-Sleep 25
-Invoke-RestMethod "http://127.0.0.1:8000/api/v1/targets/$($t.id)/results"
-Invoke-RestMethod http://127.0.0.1:8000/api/v1/summary
+Invoke-RestMethod "http://127.0.0.1:8000/api/v1/targets/$($t.id)/results" -Headers $h
+Invoke-RestMethod http://127.0.0.1:8000/api/v1/summary -Headers $h
 ```
 
-Full outage → incident → recovery demo, plus a restart-persistence check:
+In the browser, open <http://127.0.0.1:8000/docs>, click **Authorize**, and paste the key.
+
+Full outage → incident → recovery demo, plus a restart-persistence check (uses `$env:INFRASCOPE_API_KEY`):
 
 ```powershell
 .\scripts\smoke-test.ps1 -VerifyRestart
 ```
+
+Managing keys: `python -m app.cli list-api-keys` / `revoke-api-key <id>` (inside the `api`
+container), or the `/api/v1/api-keys` endpoints with an ADMIN key.
 
 Stop the stack (data is kept in the `pgdata` volume):
 
@@ -141,7 +155,12 @@ uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000
 | `API_PORT` | `8000` | Host port (always bound to `127.0.0.1`) |
 | `SLOW_DELAY_SECONDS` | `3` | Default delay of the test target's `/slow` |
 
-## Security model (Day 1)
+## Security model
+
+- Every endpoint except `/health` and the API docs requires an `X-API-Key` header. `VIEWER`
+  keys are read-only; `ADMIN` keys can also change targets and manage keys. Keys are 256-bit
+  random tokens, stored only as SHA-256 hashes, and can expire or be revoked. The API refuses
+  to revoke the last active ADMIN key (the CLI can, as a recovery path).
 
 - Only the API port is published, and only on `127.0.0.1`. PostgreSQL and the test target have
   no host ports and sit on an `internal` Docker network with no outbound route.
@@ -150,8 +169,10 @@ uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000
   backslashes and control characters are rejected. The policy is checked at registration
   **and** before every check.
 - Redirects are never followed; proxy environment variables are ignored.
-- Secrets live only in `.env` (git-ignored); the database URL is a `SecretStr` and is never logged.
-- **No authentication yet.** Do not deploy this API anywhere it is reachable by others.
+- Secrets live only in `.env` (git-ignored); the database URL is a `SecretStr` and is never
+  logged; rejected API keys are logged without the key.
+- Still a development setup: plain HTTP on localhost, no TLS and no rate limiting. Put it
+  behind a TLS reverse proxy before exposing it anywhere.
 
 ## Troubleshooting
 
@@ -163,6 +184,9 @@ uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000
 | `required variable POSTGRES_PASSWORD is missing` | You skipped `Copy-Item .env.example .env`. |
 | `api` stays `starting`/`unhealthy` | `docker compose logs api`; usually a DB password mismatch. If you changed `POSTGRES_PASSWORD` after the first start, the existing volume still has the old one. Restore it, or wipe with `docker compose down -v` (deletes data). |
 | Port 8000 already in use | Set `API_PORT=8001` in `.env`, then `docker compose up -d`. |
+| `401 Missing X-API-Key header` / `Invalid, expired or revoked API key` | Create a key with the CLI command above and send it as `X-API-Key`. |
+| `403 This action requires an ADMIN key` | You're using a VIEWER key for a write. |
+| Lost every ADMIN key | `docker compose exec api python -m app.cli create-api-key --name admin --role ADMIN` |
 | Target registration returns 422 `not in the monitoring allowlist` | Use `http://testtarget:8080/...`, or add the hostname to `ALLOWED_TARGET_HOSTS`. |
 | `docker compose exec api pytest` fails with `database "infrascope_test" does not exist` | The init script only runs on a fresh volume: `docker compose exec db createdb -U infrascope infrascope_test` |
 | Local checks of `http://localhost:...` take ~2 s | Windows tries `::1` first and waits ~2 s before falling back to IPv4. Bind the local server to `::1` (or use Docker, where service names resolve directly). |
@@ -173,11 +197,13 @@ uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000
 ```
 app/
   main.py              FastAPI factory + lifespan (starts/stops the monitor)
+  cli.py               Admin CLI (create/list/revoke API keys)
   config.py            Settings (env vars)
   db.py, models.py     SQLAlchemy engine/session and ORM models
   schemas.py           Pydantic request/response models
-  api/                 Routers: health, targets, incidents, summary
+  api/                 Routers: health, targets, incidents, summary, api_keys; auth deps
   services/
+    api_keys.py        Key generation, hashing, verification
     url_policy.py      SSRF allowlist validation
     checker.py         Real HTTP check (httpx)
     incidents.py       Incident rules (scheduler-independent)

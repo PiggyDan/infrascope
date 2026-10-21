@@ -31,6 +31,33 @@ FastAPI endpoints are plain `def` functions, so FastAPI runs them in its threadp
 SQLAlchemy session per request (`app/api/deps.py`). Target URLs go through
 `validate_target_url()` before they are stored.
 
+### Authentication (`app/api/auth.py`, `app/services/api_keys.py`)
+- Keys are `isk_` + 32 random bytes (url-safe base64), generated with `secrets`.
+- Only `sha256(key)` is stored, with a unique index; lookup is by hash, so no plaintext
+  comparison happens. A slow password hash (bcrypt/argon2) adds nothing for 256-bit random
+  secrets and would cost CPU on every request.
+- `require_viewer` resolves the key (rejecting revoked and expired keys) and is attached to
+  each protected router; write routes add `require_admin`. FastAPI caches the dependency, so
+  the key is looked up once per request.
+- `last_used_at` is written at most once per minute per key, to avoid a write on every read.
+- The first ADMIN key comes from the CLI (`python -m app.cli`), so no bootstrap secret lives
+  in configuration.
+
+```mermaid
+erDiagram
+    api_keys {
+        uuid id PK
+        varchar name
+        varchar key_prefix "first 12 chars, non-secret"
+        varchar key_hash UK "sha256 hex"
+        varchar role "VIEWER|ADMIN"
+        timestamptz created_at
+        timestamptz expires_at
+        timestamptz last_used_at
+        timestamptz revoked_at
+    }
+```
+
 ### Monitoring path
 1. `MonitorEngine` runs in its own daemon thread. It is started and stopped by the FastAPI
    lifespan, so it never blocks the event loop or API requests.
@@ -125,7 +152,8 @@ erDiagram
 
 | Boundary | Control |
 |---|---|
-| Host → API | Published on `127.0.0.1` only; no auth yet (Day 2) |
+| Host → API | Published on `127.0.0.1` only; `X-API-Key` required on everything except `/health` and docs |
+| Authorization | `VIEWER` = read; `ADMIN` = write + key management; enforced by router-level dependencies, and a test fails if any non-public route is reachable without a key |
 | Host → DB / testtarget | Not published at all |
 | Containers → internet/LAN | `db` and `testtarget` are on an `internal: true` network |
 | API → monitored URL (SSRF) | Hostname allowlist; no IP literals, userinfo, non-HTTP schemes, control chars; checked on write **and** before every request; redirects disabled; `trust_env=False` |

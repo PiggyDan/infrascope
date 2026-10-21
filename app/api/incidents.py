@@ -4,11 +4,14 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.auth import require_viewer
 from app.api.deps import get_session
 from app.models import Incident, IncidentStatus
 from app.schemas import IncidentRead
 
-router = APIRouter(prefix="/api/v1/incidents", tags=["incidents"])
+router = APIRouter(
+    prefix="/api/v1/incidents", tags=["incidents"], dependencies=[Depends(require_viewer)]
+)
 
 
 @router.get("", response_model=list[IncidentRead], summary="List incidents (newest first)")

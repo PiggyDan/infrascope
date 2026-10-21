@@ -43,6 +43,11 @@ class IncidentStatus(enum.StrEnum):
     RESOLVED = "RESOLVED"
 
 
+class ApiKeyRole(enum.StrEnum):
+    VIEWER = "VIEWER"  # read-only
+    ADMIN = "ADMIN"  # read + write + key management
+
+
 def _enum_column(enum_cls: type[enum.Enum], name: str) -> Enum:
     # VARCHAR + CHECK instead of a native PG enum keeps future migrations simple.
     return Enum(
@@ -137,3 +142,25 @@ class Incident(Base):
     resolution_reason: Mapped[str | None] = mapped_column(String(200))
 
     target: Mapped[MonitoringTarget | None] = relationship(back_populates="incidents")
+
+
+class ApiKey(Base):
+    """An API credential. Only a SHA-256 hash of the secret is stored."""
+
+    __tablename__ = "api_keys"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(100))
+    # Non-secret leading characters, so humans can tell keys apart.
+    key_prefix: Mapped[str] = mapped_column(String(16))
+    key_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    role: Mapped[ApiKeyRole] = mapped_column(_enum_column(ApiKeyRole, "api_key_role"))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    last_used_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
+    def is_active(self, now: datetime) -> bool:
+        if self.revoked_at is not None:
+            return False
+        return self.expires_at is None or now < self.expires_at
