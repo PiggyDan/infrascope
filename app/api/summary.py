@@ -4,12 +4,13 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
+from app.api.auth import require_viewer
 from app.api.deps import get_session
 from app.models import Incident, IncidentStatus, MonitoringResult, MonitoringTarget, TargetStatus
 from app.schemas import SummaryRead
 from app.timeutil import utcnow
 
-router = APIRouter(prefix="/api/v1", tags=["summary"])
+router = APIRouter(prefix="/api/v1", tags=["summary"], dependencies=[Depends(require_viewer)])
 
 
 @router.get("/summary", response_model=SummaryRead, summary="Fleet-wide monitoring summary")

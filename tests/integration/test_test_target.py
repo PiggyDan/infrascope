@@ -11,12 +11,13 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from app.api.auth import API_KEY_HEADER
 from app.db import Base
 from app.main import create_app
 from app.models import Incident, IncidentStatus, MonitoringResult
 from app.services.checker import HttpChecker
 from app.services.monitor import MonitorEngine
-from tests.conftest import FakeClock, make_settings
+from tests.conftest import FakeClock, create_key, make_settings
 
 BASE_URL = os.environ.get("INFRASCOPE_TEST_TARGET_URL", "").rstrip("/")
 
@@ -75,8 +76,9 @@ def test_end_to_end_outage_and_recovery(tmp_path):
         engine.run_once()
         clock.advance(5)
 
+    key = create_key(app.state.session_factory)
     try:
-        with TestClient(app) as client:
+        with TestClient(app, headers={API_KEY_HEADER: key}) as client:
             created = client.post(
                 "/api/v1/targets",
                 json={"name": "e2e", "url": f"{BASE_URL}/unhealthy", "interval_seconds": 5},

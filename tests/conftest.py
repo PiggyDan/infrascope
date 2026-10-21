@@ -15,10 +15,12 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.api.auth import API_KEY_HEADER
 from app.config import Settings
 from app.db import Base
 from app.main import create_app
-from app.models import MonitoringTarget
+from app.models import ApiKeyRole, MonitoringTarget
+from app.services.api_keys import create_api_key
 from app.services.checker import HttpChecker
 from app.timeutil import utcnow
 
@@ -54,8 +56,38 @@ def app(settings) -> Iterator[FastAPI]:
     engine.dispose()
 
 
+def create_key(session_factory, role: ApiKeyRole = ApiKeyRole.ADMIN, **kwargs) -> str:
+    with session_factory() as session:
+        _, raw_key = create_api_key(session, name=f"test-{role.lower()}", role=role, **kwargs)
+        session.commit()
+    return raw_key
+
+
 @pytest.fixture
-def client(app) -> Iterator[TestClient]:
+def admin_key(app) -> str:
+    return create_key(app.state.session_factory, ApiKeyRole.ADMIN)
+
+
+@pytest.fixture
+def viewer_key(app) -> str:
+    return create_key(app.state.session_factory, ApiKeyRole.VIEWER)
+
+
+@pytest.fixture
+def client(app, admin_key) -> Iterator[TestClient]:
+    """Authenticated as ADMIN."""
+    with TestClient(app, headers={API_KEY_HEADER: admin_key}) as test_client:
+        yield test_client
+
+
+@pytest.fixture
+def viewer_client(app, viewer_key) -> Iterator[TestClient]:
+    with TestClient(app, headers={API_KEY_HEADER: viewer_key}) as test_client:
+        yield test_client
+
+
+@pytest.fixture
+def anon_client(app) -> Iterator[TestClient]:
     with TestClient(app) as test_client:
         yield test_client
 

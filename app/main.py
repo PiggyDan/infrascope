@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app import __version__
-from app.api import health, incidents, summary, targets
+from app.api import api_keys, health, incidents, summary, targets
 from app.config import Settings, get_settings
 from app.db import create_db_engine, make_session_factory
 from app.services.checker import HttpChecker
@@ -22,9 +22,10 @@ DESCRIPTION = """
 InfraScope monitors HTTP(S) endpoints, stores every measurement and opens/resolves
 incidents automatically.
 
-**Day 1 security note:** this API has no authentication. It is a development API
-intended to be reachable on `127.0.0.1` only. Authentication and authorization are
-Day 2 requirements.
+**Authentication:** send an API key in the `X-API-Key` header (use the *Authorize*
+button). `VIEWER` keys can read; `ADMIN` keys can also change targets and manage keys.
+Create the first key with `python -m app.cli create-api-key --name admin --role ADMIN`.
+`/health` and these docs are public.
 """
 
 
@@ -77,4 +78,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(targets.router)
     app.include_router(incidents.router)
     app.include_router(summary.router)
+    app.include_router(api_keys.router)
     return app

@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app.models import (
     MAX_INTERVAL_SECONDS,
     MIN_INTERVAL_SECONDS,
+    ApiKeyRole,
     IncidentStatus,
     TargetStatus,
     TargetType,
@@ -91,6 +92,31 @@ class SummaryRead(BaseModel):
     failed_checks_last_24h: int
     avg_response_time_ms_last_24h: float | None
     generated_at: datetime
+
+
+class ApiKeyCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str = Field(min_length=1, max_length=100, examples=["dashboard"])
+    role: ApiKeyRole = ApiKeyRole.VIEWER
+    expires_in_days: int | None = Field(None, ge=1, le=3650)
+
+
+class ApiKeyRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    key_prefix: str
+    role: ApiKeyRole
+    created_at: datetime
+    expires_at: datetime | None
+    last_used_at: datetime | None
+    revoked_at: datetime | None
+
+
+class ApiKeyCreated(ApiKeyRead):
+    key: str = Field(description="The secret. Shown only in this response; store it securely.")
 
 
 class HealthRead(BaseModel):

@@ -135,11 +135,15 @@ def test_background_thread_start_and_graceful_stop(session_factory, settings, ma
 
 
 def test_app_lifespan_starts_and_stops_monitor(settings):
+    from app.api.auth import API_KEY_HEADER
     from app.db import Base
+    from tests.conftest import create_key
 
     app = create_app(settings.model_copy(update={"monitor_enabled": True}))
+    Base.metadata.drop_all(app.state.db_engine)
     Base.metadata.create_all(app.state.db_engine)
-    with TestClient(app) as client:
+    key = create_key(app.state.session_factory)
+    with TestClient(app, headers={API_KEY_HEADER: key}) as client:
         assert client.get("/health").json()["monitor"] == "running"
         monitor = app.state.monitor
         # API stays responsive while the monitor runs.

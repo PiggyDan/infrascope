@@ -2,7 +2,26 @@
 
 Base URL: `http://127.0.0.1:8000`. Interactive OpenAPI docs: `/docs` (raw schema: `/openapi.json`).
 
-**No authentication on Day 1.** Localhost-only development API.
+## Authentication
+
+Every endpoint except `GET /health`, `/docs` and `/openapi.json` requires an API key:
+
+```
+X-API-Key: isk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+| Role | Can do |
+|---|---|
+| `VIEWER` | All `GET` endpoints, `GET /api/v1/auth/me` |
+| `ADMIN` | Everything `VIEWER` can, plus `POST`/`PATCH`/`DELETE` on targets and all `/api/v1/api-keys` endpoints |
+
+Errors: `401` (missing, invalid, expired or revoked key; includes `WWW-Authenticate: ApiKey`),
+`403` (valid key, insufficient role).
+
+Create the first key with the CLI (the secret is printed once):
+```powershell
+docker compose exec api python -m app.cli create-api-key --name admin --role ADMIN
+```
 
 All timestamps are ISO 8601 UTC. IDs are UUIDs. Errors use FastAPI's format:
 `{"detail": "..."}`, or a list of validation errors for 422.
@@ -113,6 +132,30 @@ Newest first. Query: `status` (`OPEN`|`RESOLVED`), `target_id`, `limit` (1–500
   "generated_at": "2026-10-21T05:16:13.193801Z"
 }
 ```
+
+## API keys
+
+### `GET /api/v1/auth/me` → `200` (any key)
+Describes the calling key: `id`, `name`, `key_prefix`, `role`, `created_at`, `expires_at`,
+`last_used_at` (updated at most once a minute), `revoked_at`. The secret is never returned.
+
+### `POST /api/v1/api-keys` → `201` (ADMIN)
+| Field | Type | Rules |
+|---|---|---|
+| `name` | string | required, 1–100 chars |
+| `role` | string | `VIEWER` (default) or `ADMIN` |
+| `expires_in_days` | int | optional, 1–3650; omit for no expiry |
+
+The response contains the key fields plus `"key": "isk_..."`. **This is the only time the
+secret is shown.**
+
+### `GET /api/v1/api-keys` → `200` (ADMIN)
+All keys, including revoked ones, without secrets.
+
+### `DELETE /api/v1/api-keys/{id}` → `204` | `404` | `409` (ADMIN)
+Revokes the key immediately; revoking an already-revoked key is a no-op `204`. Returns `409`
+if it is the last active ADMIN key, so you can't lock yourself out. (The CLI
+`revoke-api-key` has no such guard: it's the recovery path.)
 
 ## Test target service (internal only)
 
